@@ -1,5 +1,6 @@
 
 import { useEffect, useState } from "react";
+import MyAppointments from "./components/MyAppointments";
 import {
   getDealerships,
   getServiceTypes,
@@ -670,6 +671,7 @@ function App() {
           )}
         </>
       )}
+      <MyAppointments />
     </main>
   );
 }

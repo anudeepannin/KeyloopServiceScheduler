@@ -249,4 +249,79 @@ public sealed class AppointmentsController : ControllerBase
 
         return Ok(appointment);
     }
+
+    [HttpGet]
+    public async Task<IActionResult> GetAppointments(
+        CancellationToken cancellationToken)
+    {
+        var appointments = await _db.Appointments
+            .AsNoTracking()
+            .OrderByDescending(a => a.StartTimeUtc)
+            .Select(a => new
+            {
+                appointmentId = a.AppointmentId,
+                customerId = a.CustomerId,
+                customerName = a.Customer.Name,
+                customerEmail = a.Customer.Email,
+                vehicleId = a.VehicleId,
+                vehicleMake = a.Vehicle.Make,
+                vehicleModel = a.Vehicle.Model,
+                vehicleYear = a.Vehicle.Year,
+                vehicleVin = a.Vehicle.VIN,
+                dealershipId = a.DealershipId,
+                dealershipName = a.Dealership.Name,
+                serviceTypeId = a.ServiceTypeId,
+                serviceName = a.ServiceType.Name,
+                technicianId = a.TechnicianId,
+                technicianName = a.Technician.Name,
+                serviceBayId = a.ServiceBayId,
+                serviceBayName = a.ServiceBay.BayName,
+                startTimeUtc = a.StartTimeUtc,
+                endTimeUtc = a.EndTimeUtc,
+                status = a.Status
+            })
+            .ToListAsync(cancellationToken);
+
+        return Ok(appointments);
+    }
+
+    [HttpPatch("{id:int}/cancel")]
+    public async Task<IActionResult> CancelAppointment(
+        int id,
+        CancellationToken cancellationToken)
+    {
+        var appointment = await _db.Appointments
+            .SingleOrDefaultAsync(
+                a => a.AppointmentId == id,
+                cancellationToken);
+
+        if (appointment is null)
+        {
+            return NotFound(new
+            {
+                message = "Appointment not found."
+            });
+        }
+
+        if (appointment.Status == "Cancelled")
+        {
+            return BadRequest(new
+            {
+                message = "Appointment is already cancelled."
+            });
+        }
+
+        appointment.Status = "Cancelled";
+
+        await _db.SaveChangesAsync(cancellationToken);
+
+        return Ok(new
+        {
+            appointmentId = appointment.AppointmentId,
+            status = appointment.Status,
+            message = "Appointment cancelled successfully."
+        });
+    }
+
+
 }
