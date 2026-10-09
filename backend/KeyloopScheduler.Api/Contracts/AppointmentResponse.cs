@@ -9,6 +9,6 @@ public sealed record AppointmentResponse(
     int ServiceTypeId,
     int TechnicianId,
     int ServiceBayId,
-    DateTime StartTimeUtc,
-    DateTime EndTimeUtc,
+    DateTimeOffset StartTimeUtc,
+    DateTimeOffset EndTimeUtc,
     string Status);

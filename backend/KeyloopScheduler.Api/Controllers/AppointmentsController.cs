@@ -1,10 +1,10 @@
 ﻿
-using System.Data;
 using KeyloopScheduler.Api.Contracts;
 using KeyloopScheduler.Api.Data;
 using KeyloopScheduler.Api.Entities;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 
 namespace KeyloopScheduler.Api.Controllers;
 
@@ -19,6 +19,9 @@ public sealed class AppointmentsController : ControllerBase
         _db = db;
     }
 
+    // POST: api/appointments
+    // Creates a new appointment after validating the customer,
+    // vehicle, service, technician, service bay and booking conflicts.
     [HttpPost]
     public async Task<IActionResult> CreateAppointment(
         [FromBody] CreateAppointmentRequest request,
@@ -30,7 +33,7 @@ public sealed class AppointmentsController : ControllerBase
         {
             return BadRequest(new
             {
-                message = "The appointment must start in the future."
+                message = "The appointment start time must be in the future."
             });
         }
 
@@ -39,41 +42,52 @@ public sealed class AppointmentsController : ControllerBase
                 IsolationLevel.Serializable,
                 cancellationToken);
 
-        var customerExists = await _db.Customers
-            .AnyAsync(
-                c => c.CustomerId == request.CustomerId,
-                cancellationToken);
+        // Validate customer.
+        var customerExists = await _db.Customers.AnyAsync(
+            c => c.CustomerId == request.CustomerId,
+            cancellationToken);
 
         if (!customerExists)
         {
-            return NotFound(new { message = "Customer not found." });
-        }
-
-        var vehicleBelongsToCustomer = await _db.Vehicles
-            .AnyAsync(
-                v => v.VehicleId == request.VehicleId &&
-                     v.CustomerId == request.CustomerId,
-                cancellationToken);
-
-        if (!vehicleBelongsToCustomer)
-        {
             return BadRequest(new
             {
-                message = "The vehicle does not belong to the selected customer."
+                message = "The specified customer was not found."
             });
         }
 
+        // Validate that the vehicle belongs to the selected customer.
+        var vehicleExists = await _db.Vehicles.AnyAsync(
+            v => v.VehicleId == request.VehicleId
+                 && v.CustomerId == request.CustomerId,
+            cancellationToken);
+
+        if (!vehicleExists)
+        {
+            return BadRequest(new
+            {
+                message = "The selected vehicle does not belong to the specified customer."
+            });
+        }
+
+        // Validate active service and retrieve its duration and skill.
         var service = await _db.ServiceTypes
-            .SingleOrDefaultAsync(
-                s => s.ServiceTypeId == request.ServiceTypeId &&
-                     s.IsActive,
-                cancellationToken);
+            .AsNoTracking()
+            .Where(s =>
+                s.ServiceTypeId == request.ServiceTypeId
+                && s.IsActive)
+            .Select(s => new
+            {
+                s.ServiceTypeId,
+                s.DurationMinutes,
+                s.RequiredSkill
+            })
+            .SingleOrDefaultAsync(cancellationToken);
 
         if (service is null)
         {
-            return NotFound(new
+            return BadRequest(new
             {
-                message = "Active service type not found."
+                message = "The specified service type was not found or is inactive."
             });
         }
 
@@ -81,6 +95,7 @@ public sealed class AppointmentsController : ControllerBase
         {
             return Problem(
                 title: "Invalid service configuration",
+                detail: "The service duration must be greater than zero.",
                 statusCode: StatusCodes.Status500InternalServerError);
         }
 
@@ -94,71 +109,68 @@ public sealed class AppointmentsController : ControllerBase
         {
             return BadRequest(new
             {
-                message = "The requested appointment time is out of range."
+                message = "The calculated appointment end time is out of range."
             });
         }
 
-        var technician = await _db.Technicians
-            .Include(t => t.Skills)
-            .SingleOrDefaultAsync(
-                t => t.TechnicianId == request.TechnicianId &&
-                     t.DealershipId == request.DealershipId &&
-                     t.IsActive,
-                cancellationToken);
-
-        if (technician is null)
-        {
-            return BadRequest(new
-            {
-                message = "The selected technician is unavailable at this dealership."
-            });
-        }
-
-        var isQualified = technician.Skills.Any(
-            s => s.SkillName == service.RequiredSkill);
-
-        if (!isQualified)
-        {
-            return BadRequest(new
-            {
-                message = "The technician does not have the required qualification."
-            });
-        }
-
-        var bayIsValid = await _db.ServiceBays
-            .AnyAsync(
-                b => b.ServiceBayId == request.ServiceBayId &&
-                     b.DealershipId == request.DealershipId &&
-                     b.IsActive,
-                cancellationToken);
-
-        if (!bayIsValid)
-        {
-            return BadRequest(new
-            {
-                message = "The selected service bay is unavailable at this dealership."
-            });
-        }
-
-        var dealershipExists = await _db.Dealerships
-            .AnyAsync(
-                d => d.DealershipId == request.DealershipId,
-                cancellationToken);
+        // Validate dealership.
+        var dealershipExists = await _db.Dealerships.AnyAsync(
+            d => d.DealershipId == request.DealershipId,
+            cancellationToken);
 
         if (!dealershipExists)
         {
-            return NotFound(new { message = "Dealership not found." });
+            return NotFound(new
+            {
+                message = "The specified dealership was not found."
+            });
         }
 
-        var technicianHasConflict = await _db.Appointments
-            .AnyAsync(
-                a => a.TechnicianId == request.TechnicianId &&
-                     a.Status != "Cancelled" &&
-                     a.StartTimeUtc < endUtc &&
-                     a.EndTimeUtc > startUtc,
-                cancellationToken);
+        // Validate technician, dealership and required skill.
+        var technicianIsValid = await _db.Technicians.AnyAsync(
+            t =>
+                t.TechnicianId == request.TechnicianId
+                && t.DealershipId == request.DealershipId
+                && t.IsActive
+                && t.Skills.Any(
+                    skill => skill.SkillName == service.RequiredSkill),
+            cancellationToken);
 
-        if (technicianHasConflict)
+        if (!technicianIsValid)
+        {
+            return BadRequest(new
+            {
+                message = "The selected technician is inactive, not assigned to this dealership, or does not have the required skill."
+            });
+        }
+
+        // Validate service bay and dealership.
+        var serviceBayIsValid = await _db.ServiceBays.AnyAsync(
+            b =>
+                b.ServiceBayId == request.ServiceBayId
+                && b.DealershipId == request.DealershipId
+                && b.IsActive,
+            cancellationToken);
+
+        if (!serviceBayIsValid)
+        {
+            return BadRequest(new
+            {
+                message = "The selected service bay is inactive or does not belong to this dealership."
+            });
+        }
+
+        // Check technician availability.
+        // Cancelled appointments do not block a new booking.
+        var technicianConflict = await _db.Appointments.AnyAsync(
+            a =>
+                a.TechnicianId == request.TechnicianId
+                && a.Status != "Cancelled"
+                && a.StartTimeUtc < endUtc
+                && a.EndTimeUtc > startUtc,
+            cancellationToken);
+
+        if (technicianConflict)
         {
             return Conflict(new
             {
@@ -166,15 +178,16 @@ public sealed class AppointmentsController : ControllerBase
             });
         }
 
-        var bayHasConflict = await _db.Appointments
-            .AnyAsync(
-                a => a.ServiceBayId == request.ServiceBayId &&
-                     a.Status != "Cancelled" &&
-                     a.StartTimeUtc < endUtc &&
-                     a.EndTimeUtc > startUtc,
-                cancellationToken);
+        // Check service bay availability.
+        var serviceBayConflict = await _db.Appointments.AnyAsync(
+            a =>
+                a.ServiceBayId == request.ServiceBayId
+                && a.Status != "Cancelled"
+                && a.StartTimeUtc < endUtc
+                && a.EndTimeUtc > startUtc,
+            cancellationToken);
 
-        if (bayHasConflict)
+        if (serviceBayConflict)
         {
             return Conflict(new
             {
@@ -182,6 +195,7 @@ public sealed class AppointmentsController : ControllerBase
             });
         }
 
+        // Create the appointment using UTC timestamps.
         var appointment = new Appointment
         {
             CustomerId = request.CustomerId,
@@ -194,8 +208,8 @@ public sealed class AppointmentsController : ControllerBase
                 startUtc, DateTimeKind.Utc),
             EndTimeUtc = DateTime.SpecifyKind(
                 endUtc, DateTimeKind.Utc),
-            CreatedAtUtc = DateTime.UtcNow,
-            Status = "Confirmed"
+            Status = "Confirmed",
+            CreatedAtUtc = DateTime.UtcNow
         };
 
         _db.Appointments.Add(appointment);
@@ -211,8 +225,8 @@ public sealed class AppointmentsController : ControllerBase
             appointment.ServiceTypeId,
             appointment.TechnicianId,
             appointment.ServiceBayId,
-            appointment.StartTimeUtc,
-            appointment.EndTimeUtc,
+            ToUtcOffset(appointment.StartTimeUtc),
+            ToUtcOffset(appointment.EndTimeUtc),
             appointment.Status);
 
         return CreatedAtAction(
@@ -221,6 +235,8 @@ public sealed class AppointmentsController : ControllerBase
             response);
     }
 
+    // GET: api/appointments/{id}
+    // Retrieves one appointment.
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetAppointment(
         int id,
@@ -228,28 +244,35 @@ public sealed class AppointmentsController : ControllerBase
     {
         var appointment = await _db.Appointments
             .AsNoTracking()
-            .Where(a => a.AppointmentId == id)
-            .Select(a => new AppointmentResponse(
-                a.AppointmentId,
-                a.CustomerId,
-                a.VehicleId,
-                a.DealershipId,
-                a.ServiceTypeId,
-                a.TechnicianId,
-                a.ServiceBayId,
-                a.StartTimeUtc,
-                a.EndTimeUtc,
-                a.Status))
-            .SingleOrDefaultAsync(cancellationToken);
+            .SingleOrDefaultAsync(
+                a => a.AppointmentId == id,
+                cancellationToken);
 
         if (appointment is null)
         {
-            return NotFound(new { message = "Appointment not found." });
+            return NotFound(new
+            {
+                message = "Appointment not found."
+            });
         }
 
-        return Ok(appointment);
+        var response = new AppointmentResponse(
+            appointment.AppointmentId,
+            appointment.CustomerId,
+            appointment.VehicleId,
+            appointment.DealershipId,
+            appointment.ServiceTypeId,
+            appointment.TechnicianId,
+            appointment.ServiceBayId,
+            ToUtcOffset(appointment.StartTimeUtc),
+            ToUtcOffset(appointment.EndTimeUtc),
+            appointment.Status);
+
+        return Ok(response);
     }
 
+    // GET: api/appointments
+    // Retrieves all appointments with details for the UI.
     [HttpGet]
     public async Task<IActionResult> GetAppointments(
         CancellationToken cancellationToken)
@@ -259,32 +282,58 @@ public sealed class AppointmentsController : ControllerBase
             .OrderByDescending(a => a.StartTimeUtc)
             .Select(a => new
             {
-                appointmentId = a.AppointmentId,
-                customerId = a.CustomerId,
-                customerName = a.Customer.Name,
-                customerEmail = a.Customer.Email,
-                vehicleId = a.VehicleId,
-                vehicleMake = a.Vehicle.Make,
-                vehicleModel = a.Vehicle.Model,
-                vehicleYear = a.Vehicle.Year,
-                vehicleVin = a.Vehicle.VIN,
-                dealershipId = a.DealershipId,
-                dealershipName = a.Dealership.Name,
-                serviceTypeId = a.ServiceTypeId,
-                serviceName = a.ServiceType.Name,
-                technicianId = a.TechnicianId,
-                technicianName = a.Technician.Name,
-                serviceBayId = a.ServiceBayId,
-                serviceBayName = a.ServiceBay.BayName,
-                startTimeUtc = a.StartTimeUtc,
-                endTimeUtc = a.EndTimeUtc,
-                status = a.Status
+                a.AppointmentId,
+                a.CustomerId,
+                CustomerName = a.Customer.Name,
+                CustomerEmail = a.Customer.Email,
+                a.VehicleId,
+                VehicleMake = a.Vehicle.Make,
+                VehicleModel = a.Vehicle.Model,
+                VehicleYear = a.Vehicle.Year,
+                VehicleVin = a.Vehicle.VIN,
+                a.DealershipId,
+                DealershipName = a.Dealership.Name,
+                a.ServiceTypeId,
+                ServiceName = a.ServiceType.Name,
+                a.TechnicianId,
+                TechnicianName = a.Technician.Name,
+                a.ServiceBayId,
+                ServiceBayName = a.ServiceBay.BayName,
+                a.StartTimeUtc,
+                a.EndTimeUtc,
+                a.Status
             })
             .ToListAsync(cancellationToken);
 
-        return Ok(appointments);
+        var response = appointments.Select(a => new
+        {
+            a.AppointmentId,
+            a.CustomerId,
+            a.CustomerName,
+            a.CustomerEmail,
+            a.VehicleId,
+            a.VehicleMake,
+            a.VehicleModel,
+            a.VehicleYear,
+            a.VehicleVin,
+            a.DealershipId,
+            a.DealershipName,
+            a.ServiceTypeId,
+            a.ServiceName,
+            a.TechnicianId,
+            a.TechnicianName,
+            a.ServiceBayId,
+            a.ServiceBayName,
+            StartTimeUtc = ToUtcOffset(a.StartTimeUtc),
+            EndTimeUtc = ToUtcOffset(a.EndTimeUtc),
+            a.Status
+        });
+
+        return Ok(response);
     }
 
+    // PATCH: api/appointments/{id}/cancel
+    // Cancels an appointment without deleting its record.
     [HttpPatch("{id:int}/cancel")]
     public async Task<IActionResult> CancelAppointment(
         int id,
@@ -323,5 +372,10 @@ public sealed class AppointmentsController : ControllerBase
         });
     }
 
-
+    // Ensures database DateTime values are serialized with an explicit UTC offset.
+    private static DateTimeOffset ToUtcOffset(DateTime value)
+    {
+        return new DateTimeOffset(
+            DateTime.SpecifyKind(value, DateTimeKind.Utc));
+    }
 }

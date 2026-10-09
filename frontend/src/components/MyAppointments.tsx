@@ -1,8 +1,8 @@
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   getAppointments,
-    cancelAppointment,
+  cancelAppointment,
   type Appointment,
 } from "../services/appointmentService";
 
@@ -30,40 +30,39 @@ function MyAppointments() {
       setLoading(false);
     }
   }
-  
-async function handleCancel(appointmentId: number) {
-  const confirmed = window.confirm(
-    `Are you sure you want to cancel appointment #${appointmentId}?`
-  );
 
-  if (!confirmed) {
-    return;
-  }
+  useEffect(() => {
+    void loadAppointments();
+  }, []);
 
-  setError("");
-
-  try {
-    await cancelAppointment(appointmentId);
-    await loadAppointments();
-  } catch (err: unknown) {
-    setError(
-      err instanceof Error
-        ? err.message
-        : "Failed to cancel appointment."
+  async function handleCancel(appointmentId: number) {
+    const confirmed = window.confirm(
+      `Are you sure you want to cancel appointment #${appointmentId}?`
     );
-  }
-}
 
+    if (!confirmed) {
+      return;
+    }
+
+    setError("");
+
+    try {
+      await cancelAppointment(appointmentId);
+      await loadAppointments();
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to cancel appointment."
+      );
+    }
+  }
 
   return (
-    <section style={{ marginTop: 40 }}>
-      <h2>My Appointments</h2>
+    <section className="my-appointments">
+      {loading && !loaded && <p>Loading appointments...</p>}
 
-      <button onClick={loadAppointments} disabled={loading}>
-        {loading ? "Loading..." : "View Appointments"}
-      </button>
-
-      {error && <p role="alert">{error}</p>}
+      {error && <p role="alert" className="error-message">{error}</p>}
 
       {loaded && appointments.length === 0 && !error && (
         <p>No appointments found.</p>
@@ -72,40 +71,52 @@ async function handleCancel(appointmentId: number) {
       {appointments.map((item) => (
         <article
           key={item.appointmentId}
-          style={{
-            border: "1px solid #ddd",
-            borderRadius: 8,
-            padding: 16,
-            marginTop: 12,
-            textAlign: "left",
-          }}
+          className="appointment-card"
         >
-          <h3>Appointment #{item.appointmentId}</h3>
-          <p>Status: {item.status}</p>
-          <p>Customer: {item.customerName}</p>
-          <p>Email: {item.customerEmail}</p>
-          <p>
-            Vehicle: {item.vehicleYear} {item.vehicleMake}{" "}
-            {item.vehicleModel}
-          </p>
-          <p>VIN: {item.vehicleVin}</p>
-          <p>Service: {item.serviceName}</p>
-          <p>Dealership: {item.dealershipName}</p>
-          <p>Technician: {item.technicianName}</p>
-          <p>Service bay: {item.serviceBayName}</p>
-          <p>
-            Start: {new Date(item.startTimeUtc + "Z").toLocaleString()}
-          </p>
-          <p>
-            End: {new Date(item.endTimeUtc + "Z").toLocaleString()}
-          </p>
-            {item.status !== "Cancelled" && (
-                <button
-                onClick={() => handleCancel(item.appointmentId)}
-                >
-                Cancel Appointment
-                </button>
-            )}
+          <div className="appointment-card-header">
+            <h3>Appointment #{item.appointmentId}</h3>
+            <span
+              className={`appointment-status ${
+                item.status.toLowerCase() === "cancelled"
+                  ? "cancelled"
+                  : "confirmed"
+              }`}
+            >
+              {item.status}
+            </span>
+          </div>
+
+          <div className="appointment-details">
+            <p><strong>Customer:</strong> {item.customerName}</p>
+            <p><strong>Email:</strong> {item.customerEmail}</p>
+            <p>
+              <strong>Vehicle:</strong> {item.vehicleYear}{" "}
+              {item.vehicleMake} {item.vehicleModel}
+            </p>
+            <p><strong>VIN:</strong> {item.vehicleVin}</p>
+            <p><strong>Service:</strong> {item.serviceName}</p>
+            <p><strong>Dealership:</strong> {item.dealershipName}</p>
+            <p><strong>Technician:</strong> {item.technicianName}</p>
+            <p><strong>Service bay:</strong> {item.serviceBayName}</p>
+            <p>
+              <strong>Start:</strong>{" "}
+              {new Date(item.startTimeUtc).toLocaleString()}
+            </p>
+            <p>
+              <strong>End:</strong>{" "}
+              {new Date(item.endTimeUtc).toLocaleString()}
+            </p>
+          </div>
+
+          {item.status.toLowerCase() !== "cancelled" && (
+            <button
+              className="cancel-appointment-button"
+              onClick={() => handleCancel(item.appointmentId)}
+              disabled={loading}
+            >
+              Cancel Appointment
+            </button>
+          )}
         </article>
       ))}
     </section>
