@@ -1,0 +1,6 @@
+@KeyloopScheduler.Api_HostAddress = http://localhost:5274
+
+GET {{KeyloopScheduler.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
