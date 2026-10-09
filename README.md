@@ -19,7 +19,7 @@ A vehicle service appointment scheduling application built with React, TypeScrip
 - Database: SQL Server LocalDB
 - ORM: Entity Framework Core
 - API documentation: Swagger / OpenAPI
-- Testing: xUnit
+- Testing: xUnit, EF Core InMemory, SQLite in-memory
 - Version control: Git and GitHub
 
 ## Prerequisites
@@ -85,13 +85,25 @@ Keep the backend running while using the frontend.
 
 ## Run Tests
 
-From the repository root:
+From the repository root, run:
 
 ```powershell
 dotnet test backend/KeyloopScheduler.slnx
 ```
 
-The test command builds the solution and runs the automated tests included in the repository.
+The automated test suite currently contains 13 tests, covering:
+
+- Date and time behavior.
+- Appointment retrieval and missing-record handling.
+- Booking validation, including past appointment times and unknown customers.
+- Successful appointment creation.
+- Technician and service-bay scheduling conflicts.
+- Appointment cancellation and repeated cancellation.
+- Allowing new bookings when previous appointments are cancelled.
+
+The suite uses xUnit, EF Core InMemory for selected controller tests, and SQLite in-memory for relational booking integration tests.
+
+Review the latest test output to confirm the actual pass/fail counts before submission.
 
 ## API Overview
 
@@ -115,22 +127,40 @@ See [`docs/SystemDesign.md`](docs/SystemDesign.md) for the system design, archit
 
 ## AI Collaboration Narrative
 
-### Strategy
+### AI-Assisted Development Strategy
 
-GenAI was used as a development assistant to break the assessment into manageable tasks, explore implementation approaches, explain unfamiliar concepts, and help structure code and documentation. Requests were guided by the existing scenario, project architecture, technology stack, and required acceptance criteria.
+GenAI was used as a development assistant throughout the implementation of the Keyloop Service Scheduler. It helped break the assessment into manageable tasks, explain technical concepts, explore implementation approaches, and structure the application and documentation.
 
-### Verification
+Development proceeded incrementally, with the existing project structure, technology stack, and assessment requirements guiding the implementation.
 
-AI-generated suggestions were reviewed against the existing implementation. The application was run locally, API behavior was inspected using Swagger, and the frontend workflow was checked in the browser. Automated tests were run to verify the behavior covered by the test suite.
+### Implementation and Verification
 
-### Refinement and Quality Ownership
+AI assistance was used to help develop and refine the React frontend, ASP.NET Core Web API, database integration, appointment booking workflow, and automated tests.
 
-When issues appeared, the relevant code and error output were reviewed before making changes. The implementation was refined incrementally, preserving working functionality while addressing identified issues. Final decisions and responsibility for the submitted code remained with the developer.
+Suggestions were verified by building and running the application, exercising API endpoints through Swagger, checking the frontend in the browser, and running the automated test suite.
 
-The narrative should be updated before submission to reflect the actual prompts used, specific issues encountered, test coverage, and verification steps completed during development.
+### Debugging and Quality Improvements
+
+During testing, the EF Core InMemory provider exposed a limitation involving database transactions. The test setup was adjusted for the validation scenarios, and SQLite in-memory was introduced for relational integration tests.
+
+The integration tests were expanded to cover successful booking, technician and service-bay scheduling conflicts, and cancellation-related behavior. A reported vulnerability in a transitive SQLite dependency was also investigated and addressed by updating the SQLite provider and rechecking the dependency tree.
+
+### Developer Ownership
+
+AI-generated suggestions were reviewed and tested rather than accepted automatically. Errors were investigated using compiler output and test results, and changes were made incrementally to preserve working functionality.
+
+The developer remained responsible for reviewing the implementation, verifying the results, and deciding which changes to retain.
+
+### Further Evidence
+
+For the final submission, this narrative should be supplemented with representative prompts, examples of AI suggestions that required correction, and the corresponding verification results.
 
 ## Known Limitations and Future Improvements
 
 Potential improvements include authentication and authorization, appointment notifications, broader automated test coverage, and production monitoring with centralized logs, metrics, tracing, and alerts.
 
 These are future enhancements unless explicitly implemented in the current version.
+
+## Assessment Demo
+
+Add the presentation video link here when it is available. The demo should cover the application overview, booking workflow, cancellation workflow, design highlights, AI collaboration, and lessons learned.
