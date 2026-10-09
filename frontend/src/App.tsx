@@ -10,32 +10,50 @@ import {
   type Availability,
   type AppointmentResponse,
 } from "./services/api";
+
+import {
+  getCustomers,
+  getCustomerVehicles,
+  type Customer,
+  type Vehicle,
+} from "./services/customerService";
+
 import "./App.css";
 
 function App() {
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
   const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
-  const [selectedDealershipId, setSelectedDealershipId] = useState<number | null>(null);
-  const [selectedServiceTypeId, setSelectedServiceTypeId] = useState<number | null>(null);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+
+  const [selectedDealershipId, setSelectedDealershipId] =
+    useState<number | null>(null);
+  const [selectedServiceTypeId, setSelectedServiceTypeId] =
+    useState<number | null>(null);
+  const [selectedCustomerId, setSelectedCustomerId] =
+    useState<number | null>(null);
+  const [selectedVehicleId, setSelectedVehicleId] =
+    useState<number | null>(null);
 
   const [serviceDate, setServiceDate] = useState("");
   const [serviceTime, setServiceTime] = useState("09:00");
 
   const [availability, setAvailability] = useState<Availability[]>([]);
-  const [selectedSlot, setSelectedSlot] = useState<Availability | null>(null);
+  const [selectedSlot, setSelectedSlot] =
+    useState<Availability | null>(null);
 
-  const [customerId, setCustomerId] = useState("1");
-  const [vehicleId, setVehicleId] = useState("1");
+  const [appointment, setAppointment] =
+    useState<AppointmentResponse | null>(null);
 
   const [loading, setLoading] = useState(true);
+  const [loadingCustomers, setLoadingCustomers] = useState(true);
   const [loadingServices, setLoadingServices] = useState(false);
+  const [loadingVehicles, setLoadingVehicles] = useState(false);
   const [searching, setSearching] = useState(false);
   const [booking, setBooking] = useState(false);
 
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const [appointment, setAppointment] =
-    useState<AppointmentResponse | null>(null);
 
   // Load dealerships
   useEffect(() => {
@@ -74,25 +92,61 @@ function App() {
     };
   }, []);
 
-  // Load services whenever the dealership changes
+  // Load customers
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadCustomers() {
+      try {
+        const data = await getCustomers();
+
+        if (!cancelled) {
+          setCustomers(data);
+
+          if (data.length > 0) {
+            setSelectedCustomerId(data[0].customerId);
+          }
+        }
+      } catch (err: unknown) {
+        if (!cancelled) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Failed to load customers."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingCustomers(false);
+        }
+      }
+    }
+
+    void loadCustomers();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Load services when dealership changes
   useEffect(() => {
     let cancelled = false;
 
     async function loadServices() {
-      if (selectedDealershipId === null) {
-        setServiceTypes([]);
-        setSelectedServiceTypeId(null);
-        return;
-      }
-
-      setLoadingServices(true);
       setServiceTypes([]);
       setSelectedServiceTypeId(null);
       setAvailability([]);
       setSelectedSlot(null);
       setAppointment(null);
       setMessage("");
-      setError("");
+
+      if (selectedDealershipId === null) {
+        setLoadingServices(false);
+        return;
+      }
+
+      setLoadingServices(true);
 
       try {
         const data = await getServiceTypes(selectedDealershipId);
@@ -105,7 +159,7 @@ function App() {
           setError(
             err instanceof Error
               ? err.message
-              : "Failed to load service types."
+              : "Failed to load services."
           );
         }
       } finally {
@@ -122,7 +176,58 @@ function App() {
     };
   }, [selectedDealershipId]);
 
-  // Search for available technicians and bays
+  // Load vehicles when customer changes
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadVehicles() {
+      setVehicles([]);
+      setSelectedVehicleId(null);
+      setAvailability([]);
+      setSelectedSlot(null);
+      setAppointment(null);
+      setMessage("");
+
+      if (selectedCustomerId === null) {
+        setLoadingVehicles(false);
+        return;
+      }
+
+      setLoadingVehicles(true);
+
+      try {
+        const data = await getCustomerVehicles(selectedCustomerId);
+
+        if (!cancelled) {
+          setVehicles(data);
+
+          if (data.length > 0) {
+            setSelectedVehicleId(data[0].vehicleId);
+          }
+        }
+      } catch (err: unknown) {
+        if (!cancelled) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Failed to load customer vehicles."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingVehicles(false);
+        }
+      }
+    }
+
+    void loadVehicles();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCustomerId]);
+
+  // Search available technicians and service bays
   async function searchAvailability() {
     if (
       selectedDealershipId === null ||
@@ -156,13 +261,10 @@ function App() {
     setAppointment(null);
 
     try {
-      // Convert the browser-local date/time to UTC for the API.
-      const startTimeUtc = selectedDateTime.toISOString();
-
       const results = await getAvailability(
         selectedDealershipId,
         selectedServiceTypeId,
-        startTimeUtc
+        selectedDateTime.toISOString()
       );
 
       setAvailability(results);
@@ -184,24 +286,13 @@ function App() {
   // Book the selected slot
   async function bookAppointment() {
     if (
-      !selectedSlot ||
+      selectedSlot === null ||
       selectedDealershipId === null ||
-      selectedServiceTypeId === null
+      selectedServiceTypeId === null ||
+      selectedCustomerId === null ||
+      selectedVehicleId === null
     ) {
-      setError("Please select an available slot.");
-      return;
-    }
-
-    const parsedCustomerId = Number(customerId);
-    const parsedVehicleId = Number(vehicleId);
-
-    if (
-      !Number.isInteger(parsedCustomerId) ||
-      parsedCustomerId <= 0 ||
-      !Number.isInteger(parsedVehicleId) ||
-      parsedVehicleId <= 0
-    ) {
-      setError("Enter valid positive customer and vehicle IDs.");
+      setError("Please complete all required selections.");
       return;
     }
 
@@ -212,8 +303,8 @@ function App() {
 
     try {
       const result = await createAppointment({
-        customerId: parsedCustomerId,
-        vehicleId: parsedVehicleId,
+        customerId: selectedCustomerId,
+        vehicleId: selectedVehicleId,
         dealershipId: selectedDealershipId,
         serviceTypeId: selectedServiceTypeId,
         technicianId: selectedSlot.technicianId,
@@ -225,7 +316,9 @@ function App() {
       setMessage("Your appointment was booked successfully.");
     } catch (err: unknown) {
       setError(
-        err instanceof Error ? err.message : "Appointment booking failed."
+        err instanceof Error
+          ? err.message
+          : "Appointment booking failed."
       );
     } finally {
       setBooking(false);
@@ -236,22 +329,22 @@ function App() {
     (d) => d.dealershipId === selectedDealershipId
   );
 
+  const selectedCustomer = customers.find(
+    (c) => c.customerId === selectedCustomerId
+  );
+
+  const selectedVehicle = vehicles.find(
+    (v) => v.vehicleId === selectedVehicleId
+  );
+
   const selectedService = serviceTypes.find(
     (s) => s.serviceTypeId === selectedServiceTypeId
   );
 
   return (
-    <main
-      style={{
-        maxWidth: 900,
-        margin: "40px auto",
-        padding: 24,
-      }}
-    >
+    <main style={{ maxWidth: 900, margin: "40px auto", padding: 24 }}>
       <h1>Keyloop Service Scheduler</h1>
       <p>Book your vehicle service appointment.</p>
-
-      {loading && <p>Loading dealerships...</p>}
 
       {error && (
         <p role="alert" style={{ color: "#ff7777" }}>
@@ -259,9 +352,10 @@ function App() {
         </p>
       )}
 
-      {!loading && (
+      {loading ? (
+        <p>Loading dealerships...</p>
+      ) : (
         <>
-          {/* Dealership selection */}
           <section>
             <h2>Select Dealership</h2>
 
@@ -269,33 +363,26 @@ function App() {
               value={selectedDealershipId ?? ""}
               onChange={(event) =>
                 setSelectedDealershipId(
-                  event.target.value
-                    ? Number(event.target.value)
-                    : null
+                  event.target.value ? Number(event.target.value) : null
                 )
               }
             >
               <option value="">Select a dealership</option>
-
-              {dealerships.map((dealership) => (
-                <option
-                  key={dealership.dealershipId}
-                  value={dealership.dealershipId}
-                >
-                  {dealership.name}
+              {dealerships.map((d) => (
+                <option key={d.dealershipId} value={d.dealershipId}>
+                  {d.name}
                 </option>
               ))}
             </select>
 
             {selectedDealership && (
-              <div>
+              <>
                 <p>{selectedDealership.address}</p>
                 <p>Time zone: {selectedDealership.timeZoneId}</p>
-              </div>
+              </>
             )}
           </section>
 
-          {/* Service selection */}
           <section>
             <h2>Select Service</h2>
 
@@ -320,10 +407,7 @@ function App() {
                 <input
                   type="radio"
                   name="serviceType"
-                  value={service.serviceTypeId}
-                  checked={
-                    selectedServiceTypeId === service.serviceTypeId
-                  }
+                  checked={selectedServiceTypeId === service.serviceTypeId}
                   onChange={() => {
                     setSelectedServiceTypeId(service.serviceTypeId);
                     setAvailability([]);
@@ -333,18 +417,13 @@ function App() {
                     setError("");
                   }}
                 />
-
-                <strong style={{ marginLeft: 8 }}>
-                  {service.name}
-                </strong>
-
+                <strong style={{ marginLeft: 8 }}>{service.name}</strong>
                 <p>Duration: {service.durationMinutes} minutes</p>
                 <p>Required skill: {service.requiredSkill}</p>
               </label>
             ))}
           </section>
 
-          {/* Date and time selection */}
           <section>
             <h2>Choose Date and Time</h2>
 
@@ -352,6 +431,7 @@ function App() {
               Service date:{" "}
               <input
                 type="date"
+                min={new Date().toLocaleDateString("en-CA")}
                 value={serviceDate}
                 onChange={(event) => {
                   setServiceDate(event.target.value);
@@ -392,10 +472,7 @@ function App() {
             </button>
           </section>
 
-          {/* Availability results */}
-          {message && !appointment && (
-            <p role="status">{message}</p>
-          )}
+          {message && !appointment && <p role="status">{message}</p>}
 
           {availability.length > 0 && (
             <section>
@@ -432,20 +509,16 @@ function App() {
                         setError("");
                       }}
                     />
-
                     <strong style={{ marginLeft: 8 }}>
                       Select this slot
                     </strong>
-
                     <p>Technician: {slot.technicianName}</p>
                     <p>Service bay: {slot.bayName}</p>
                     <p>
-                      Start:{" "}
-                      {new Date(slot.startTimeUtc).toLocaleString()}
+                      Start: {new Date(slot.startTimeUtc).toLocaleString()}
                     </p>
                     <p>
-                      End:{" "}
-                      {new Date(slot.endTimeUtc).toLocaleString()}
+                      End: {new Date(slot.endTimeUtc).toLocaleString()}
                     </p>
                   </label>
                 );
@@ -453,61 +526,121 @@ function App() {
             </section>
           )}
 
-          {/* Booking form */}
           {selectedSlot && !appointment && (
             <section>
-              <h2>Customer and Vehicle Details</h2>
+              <h2>Customer Details</h2>
 
-              <p>
-                Service: {selectedService?.name}
-              </p>
-              <p>
-                Technician: {selectedSlot.technicianName}
-              </p>
-              <p>
-                Service bay: {selectedSlot.bayName}
-              </p>
+              {loadingCustomers ? (
+                <p>Loading customers...</p>
+              ) : (
+                <>
+                  <label>
+                    Customer:
+                    <br />
+                    <select
+                      value={selectedCustomerId ?? ""}
+                      onChange={(event) => {
+                        setSelectedCustomerId(
+                          event.target.value ? Number(event.target.value) : null
+                        );
+                        setSelectedSlot(null);
+                        setAppointment(null);
+                        setError("");
+                      }}
+                    >
+                      <option value="">Select a customer</option>
+                      {customers.map((customer) => (
+                        <option
+                          key={customer.customerId}
+                          value={customer.customerId}
+                        >
+                          {customer.name} (ID: {customer.customerId})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
 
-              <div style={{ marginBottom: 16 }}>
-                <label>
-                  Customer ID:
-                  <br />
-                  <input
-                    type="number"
-                    min="1"
-                    value={customerId}
-                    onChange={(event) =>
-                      setCustomerId(event.target.value)
-                    }
-                  />
-                </label>
-              </div>
+                  {selectedCustomer && (
+                    <div>
+                      <p>Email: {selectedCustomer.email}</p>
+                      <p>Phone: {selectedCustomer.phone}</p>
+                    </div>
+                  )}
+                </>
+              )}
 
-              <div style={{ marginBottom: 16 }}>
-                <label>
-                  Vehicle ID:
-                  <br />
-                  <input
-                    type="number"
-                    min="1"
-                    value={vehicleId}
-                    onChange={(event) =>
-                      setVehicleId(event.target.value)
-                    }
-                  />
-                </label>
-              </div>
+              <h2>Vehicle Details</h2>
+
+              {loadingVehicles ? (
+                <p>Loading vehicles...</p>
+              ) : (
+                <>
+                  <label>
+                    Vehicle:
+                    <br />
+                    <select
+                      value={selectedVehicleId ?? ""}
+                      onChange={(event) => {
+                        setSelectedVehicleId(
+                          event.target.value ? Number(event.target.value) : null
+                        );
+                        setAppointment(null);
+                        setError("");
+                      }}
+                      disabled={
+                        selectedCustomerId === null || vehicles.length === 0
+                      }
+                    >
+                      <option value="">Select a vehicle</option>
+                      {vehicles.map((vehicle) => (
+                        <option
+                          key={vehicle.vehicleId}
+                          value={vehicle.vehicleId}
+                        >
+                          {vehicle.year} {vehicle.make} {vehicle.model} — VIN:{" "}
+                          {vehicle.vin}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  {selectedVehicle && (
+                    <div>
+                      <p>
+                        Vehicle: {selectedVehicle.year}{" "}
+                        {selectedVehicle.make} {selectedVehicle.model}
+                      </p>
+                      <p>VIN: {selectedVehicle.vin}</p>
+                    </div>
+                  )}
+
+                  {!loadingVehicles && vehicles.length === 0 && (
+                    <p>No vehicles found for this customer.</p>
+                  )}
+                </>
+              )}
+
+              <h2>Booking Summary</h2>
+              <p>Dealership: {selectedDealership?.name}</p>
+              <p>Service: {selectedService?.name}</p>
+              <p>Technician: {selectedSlot.technicianName}</p>
+              <p>Service bay: {selectedSlot.bayName}</p>
 
               <button
                 onClick={bookAppointment}
-                disabled={booking}
+                disabled={
+                  booking ||
+                  loadingCustomers ||
+                  loadingVehicles ||
+                  selectedCustomerId === null ||
+                  selectedVehicleId === null
+                }
               >
                 {booking ? "Booking..." : "Book Appointment"}
               </button>
             </section>
           )}
 
-          {/* Booking confirmation */}
           {appointment && (
             <section
               role="status"
@@ -520,17 +653,18 @@ function App() {
             >
               <h2>Appointment Confirmed!</h2>
               <p>{message}</p>
-              <p>
-                Appointment ID: {appointment.appointmentId}
-              </p>
+              <p>Appointment ID: {appointment.appointmentId}</p>
               <p>Status: {appointment.status}</p>
+              <p>Customer: {selectedCustomer?.name}</p>
               <p>
-                Start:{" "}
-                {new Date(appointment.startTimeUtc).toLocaleString()}
+                Vehicle: {selectedVehicle?.year} {selectedVehicle?.make}{" "}
+                {selectedVehicle?.model}
               </p>
               <p>
-                End:{" "}
-                {new Date(appointment.endTimeUtc).toLocaleString()}
+                Start: {new Date(appointment.startTimeUtc).toLocaleString()}
+              </p>
+              <p>
+                End: {new Date(appointment.endTimeUtc).toLocaleString()}
               </p>
             </section>
           )}
